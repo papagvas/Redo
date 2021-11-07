@@ -1,10 +1,12 @@
-import Control.Monad (filterM)
+import Control.Monad (filterM, liftM, unless)
+import qualified Data.ByteString.Lazy as BL
+import Data.Digest.Pure.MD5 (md5)
 import Data.Map.Lazy (insert, fromList, toList, adjust)
 import Data.Maybe (listToMaybe)
 import System.Directory (renameFile, removeFile, doesFileExist, getDirectoryContents)
 import System.Environment (getArgs, getEnvironment)
 import System.Exit (ExitCode(..))
-import System.FilePath (hasExtension, replaceBaseName, takeBaseName)
+import System.FilePath (hasExtension, replaceBaseName, takeBaseName, (</>))
 import System.IO (hPutStrLn, stderr)
 import System.Process (createProcess, waitForProcess, shell, CreateProcess(..))
 
@@ -14,7 +16,8 @@ main = getArgs >>= mapM_ redo
 
 redo :: String -> IO ()
 redo target = do
-  redoPath target >>= maybe (error $ "No .do file found for target '" ++ target ++ "'") redo'  
+  upToDate' <- upToDate target
+  unless upToDate' $ redoPath target >>= maybe (error $ "No .do file found for target '" ++ target ++ "'") redo'  
   where redo' :: FilePath -> IO ()
         redo' path = do
           oldEnv <- getEnvironment
@@ -33,13 +36,22 @@ redoPath target = filterM doesFileExist candidates >>= return . listToMaybe
 
 upToDate :: String -> IO Bool
 upToDate target = do
-  sumsAndDeps <- readFile (depDir </> checksums) >>= return . words
-  mapM depUpToDate deps
-  where sums = [sumsAndDeps !! x | x <- [1,3..(length sumsAndDeps - 1)]]
-        deps = [sumsAndDeps !! x | x <- [0,2..(length sumsAndDeps - 1)]]
-	checksumDict = fromList $ zip deps sums  
-	depUpToDate :: [Char] -> IO Bool 
-	depUpTodate dep = lookup dep checksumDict >>= maybe (return False) (return . (md5hash dep ==))
+  sumsAndDeps <- readFile (depDir </> "checksums") >>= return . words
+  let sums = [sumsAndDeps !! x | x <- [1,3..(length sumsAndDeps - 1)]]
+      deps = [sumsAndDeps !! x | x <- [0,2..(length sumsAndDeps - 1)]]
+      checksumDict = zip deps sums
+      depUpToDate :: String -> IO Bool 
+      depUpToDate dep = do
+        maybeHash <- return (lookup dep checksumDict)
+        case maybeHash of
+          Nothing -> return False
+          Just hash -> do
+	    newHash <- (show . md5) `liftM` BL.readFile dep
+	    return $ newHash == hash
+  all id `liftM` mapM depUpToDate deps
+  where depDir = ".redo" </> target
+	
+	
 	
 	   
 	  
