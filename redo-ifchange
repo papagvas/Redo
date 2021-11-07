@@ -1,0 +1,2 @@
+echo $REDO_TARGET $@ 1>&2
+md5sum $@ > ".redo/$REDO_TARGET/checksums"
